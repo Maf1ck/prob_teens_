@@ -76,7 +76,7 @@ function App() {
                     'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
                 },
                 body: JSON.stringify({
-                    model: 'gpt-4o',
+                    model: 'gpt-5.2',
                     messages: [{
                         role: 'user',
                         content: [
