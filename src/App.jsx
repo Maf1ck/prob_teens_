@@ -70,6 +70,7 @@ function App() {
     const yPct = Math.round(((e.clientY - rect.top) / rect.height) * 100)
     setX(xPct)
     setY(yPct)
+    setResult('') 
   }
 
   const analyzeImage = async () => {
@@ -151,15 +152,29 @@ function App() {
             background: 'red',
             borderRadius: '50%',
             transform: 'translate(-50%, -50%)',
-            pointerEvents: 'none'
+            pointerEvents: 'none',
+            zIndex: 2
           }}></div>
-        </div>
-      )}
 
-      {result && (
-        <div style={{ marginTop: '20px' }}>
-          <strong>Result:</strong>
-          <pre style={{ whiteSpace: 'pre-wrap' }}>{result}</pre>
+          {result && (
+            <div style={{
+              position: 'absolute',
+              left: `${x}%`,
+              top: `${y}%`,
+              transform: 'translate(10px, 10px)',
+              background: 'rgba(255, 255, 255, 0.9)',
+              padding: '10px',
+              borderRadius: '8px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+              maxWidth: '200px',
+              zIndex: 3,
+              fontSize: '14px',
+              border: '1px solid #ccc'
+            }}>
+              <strong>Result:</strong>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{result}</div>
+            </div>
+          )}
         </div>
       )}
     </main>
