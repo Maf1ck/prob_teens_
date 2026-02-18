@@ -5,8 +5,9 @@ function Home() {
     const [preview, setPreview] = useState(null)
     const [x, setX] = useState(0)
     const [y, setY] = useState(0)
-    const [language, setLanguage] = useState('English')
-    const [result, setResult] = useState('')
+    const [langFrom, setLangFrom] = useState('Ukrainian')
+    const [langTo, setLangTo] = useState('English')
+    const [result, setResult] = useState(null)
     const [loading, setLoading] = useState(false)
     const [showCamera, setShowCamera] = useState(false)
     const videoRef = useRef(null)
@@ -71,13 +72,34 @@ function Home() {
         const yPct = Math.round(((e.clientY - rect.top) / rect.height) * 100)
         setX(xPct)
         setY(yPct)
-        setResult('')
+        setResult(null)
+    }
+
+    const cropImage = (imageSrc, bbox) => {
+        return new Promise((resolve) => {
+            const img = new Image()
+            img.onload = () => {
+                const canvas = document.createElement('canvas')
+                const [ymin, xmin, ymax, xmax] = bbox
+                const startX = (xmin / 1000) * img.width
+                const startY = (ymin / 1000) * img.height
+                const width = ((xmax - xmin) / 1000) * img.width
+                const height = ((ymax - ymin) / 1000) * img.height
+
+                canvas.width = width
+                canvas.height = height
+                const ctx = canvas.getContext('2d')
+                ctx.drawImage(img, startX, startY, width, height, 0, 0, width, height)
+                resolve(canvas.toDataURL('image/jpeg'))
+            }
+            img.src = imageSrc
+        })
     }
 
     const analyzeImage = async () => {
         if (!preview) return alert('Upload image first')
         setLoading(true)
-        setResult('Analyzing...')
+        setResult({ textFrom: 'Analyzing...', textTo: '...', thumbnail: null })
 
         try {
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -91,16 +113,33 @@ function Home() {
                     messages: [{
                         role: 'user',
                         content: [
-                            { type: 'text', text: `What is at X:${x}% Y:${y}%? Answer in ${language}, names in ${language}.` },
+                            {
+                                type: 'text',
+                                text: `Analyze the object at X:${x}% Y:${y}%. 
+                                Provide the result in two languages:
+                                - "textFrom": Name in ${langFrom}
+                                - "textTo": Name in ${langTo}
+                                - "bbox": [ymin, xmin, ymax, xmax] (0-1000 scaled).
+                                Respond ONLY with the JSON object.`
+                            },
                             { type: 'image_url', image_url: { url: preview } }
                         ]
-                    }]
+                    }],
+                    response_format: { type: "json_object" }
                 })
             })
             const data = await response.json()
-            setResult(data.choices[0].message.content)
+            const parsed = JSON.parse(data.choices[0].message.content)
+
+            const thumbnail = await cropImage(preview, parsed.bbox)
+
+            setResult({
+                ...parsed,
+                thumbnail
+            })
         } catch (err) {
-            setResult('Error: ' + err.message)
+            alert('Error: ' + err.message)
+            setResult(null)
         } finally {
             setLoading(false)
         }
@@ -110,11 +149,11 @@ function Home() {
         const saved = JSON.parse(localStorage.getItem('dictionary') || '[]')
         const newItem = {
             id: Date.now(),
-            image: preview,
+            image: result.thumbnail || preview,
             x,
             y,
-            result,
-            language,
+            result: `${result.textFrom} - ${result.textTo}`,
+            language: `${langFrom} -> ${langTo}`,
             date: new Date().toLocaleString()
         }
         localStorage.setItem('dictionary', JSON.stringify([newItem, ...saved]))
@@ -124,7 +163,7 @@ function Home() {
     return (
         <main>
             <nav>
-                <Link to="/dictionary"> Відкрити словник</Link>
+                <Link to="/dictionary">Відкрити словник</Link>
             </nav>
 
             <div>
@@ -145,10 +184,20 @@ function Home() {
             <div>
                 <label>X (%): <input type="number" value={x} onChange={e => setX(e.target.value)} /></label>
                 <label>Y (%): <input type="number" value={y} onChange={e => setY(e.target.value)} /></label>
-                <select value={language} onChange={e => setLanguage(e.target.value)}>
-                    <option value="English">English</option>
-                    <option value="Ukrainian">Ukrainian</option>
-                </select>
+
+                <div>
+                    <span>З: </span>
+                    <select value={langFrom} onChange={e => setLangFrom(e.target.value)}>
+                        <option value="Ukrainian">Ukrainian</option>
+                        <option value="English">English</option>
+                    </select>
+                    <span> На: </span>
+                    <select value={langTo} onChange={e => setLangTo(e.target.value)}>
+                        <option value="English">English</option>
+                        <option value="Ukrainian">Ukrainian</option>
+                    </select>
+                </div>
+
                 <button onClick={analyzeImage} disabled={loading}>
                     {loading ? '...' : 'Analyze'}
                 </button>
@@ -187,10 +236,19 @@ function Home() {
                             border: '1px solid black'
                         }}>
                             <strong>Result:</strong>
-                            <div style={{ whiteSpace: 'pre-wrap' }}>{result}</div>
-                            <button onClick={saveToDictionary}>
-                                Зберегти в словник
-                            </button>
+                            {result.thumbnail && (
+                                <div>
+                                    <img src={result.thumbnail} alt="crop" style={{ width: '80px', display: 'block' }} />
+                                </div>
+                            )}
+                            <div>{result.textFrom}</div>
+                            <div>{result.textTo}</div>
+
+                            {!loading && (
+                                <button onClick={saveToDictionary}>
+                                    Зберегти в словник
+                                </button>
+                            )}
                         </div>
                     )}
                 </div>
