@@ -209,7 +209,6 @@ Respond ONLY with the JSON object, no other text.`
             )}
 
             <div>
-                <p>Click on the image to place up to {MAX_DOTS} dots ({dots.length}/{MAX_DOTS} placed). Click a dot to remove it.</p>
                 {dots.length > 0 && <button type="button" onClick={clearDots}>Clear all dots</button>}
 
                 <div>
