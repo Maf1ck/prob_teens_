@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react'
 import { Link } from 'react-router-dom'
 
+const MAX_DOTS = 3
+
 function Home() {
     const [preview, setPreview] = useState(null)
-    const [x, setX] = useState(0)
-    const [y, setY] = useState(0)
+    const [dots, setDots] = useState([]) // up to 3 points: [{ x, y }, ...]
     const [langFrom, setLangFrom] = useState('Ukrainian')
     const [langTo, setLangTo] = useState('English')
     const [result, setResult] = useState(null)
@@ -67,11 +68,21 @@ function Home() {
     }
 
     const handleImageClick = (e) => {
+        if (dots.length >= MAX_DOTS) return
         const rect = e.target.getBoundingClientRect()
         const xPct = Math.round(((e.clientX - rect.left) / rect.width) * 100)
         const yPct = Math.round(((e.clientY - rect.top) / rect.height) * 100)
-        setX(xPct)
-        setY(yPct)
+        setDots(prev => [...prev, { x: xPct, y: yPct }])
+        setResult(null)
+    }
+
+    const removeDot = (index) => {
+        setDots(prev => prev.filter((_, i) => i !== index))
+        setResult(null)
+    }
+
+    const clearDots = () => {
+        setDots([])
         setResult(null)
     }
 
@@ -98,8 +109,26 @@ function Home() {
 
     const analyzeImage = async () => {
         if (!preview) return alert('Upload image first')
+        if (dots.length === 0) return alert('Click on the image to place at least one dot (up to 3)')
         setLoading(true)
-        setResult({ textFrom: 'Analyzing...', textTo: '...', thumbnail: null })
+        setResult({ textFrom: 'Analyzing...', textTo: '...', thumbnail: null, elements: [] })
+
+        const pointsDescription = dots.map((d, i) => `Point ${i + 1}: X:${d.x}%, Y:${d.y}%`).join('; ')
+
+        const promptText = `The user marked ${dots.length} point(s) on this image at the following coordinates (percentage of image width and height): ${pointsDescription}.
+
+For each marked point:
+1. Identify the visible element at that location (object, text, region of interest).
+2. Stroke (outline) that element — i.e. define its boundary.
+3. Return the coordinates of that stroke for each element.
+
+Provide your response as JSON with an "elements" array. Each element must have:
+- "textFrom": name or description in ${langFrom}
+- "textTo": name or description in ${langTo}
+- "bbox": [ymin, xmin, ymax, xmax] — the bounding box of the stroked outline, in 0–1000 scale (e.g. 0,0 = top-left, 1000,1000 = bottom-right of the image).
+
+If there is only one point, you may instead return a single object with "textFrom", "textTo", and "bbox" at the top level for backward compatibility.
+Respond ONLY with the JSON object, no other text.`
 
         try {
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -113,15 +142,7 @@ function Home() {
                     messages: [{
                         role: 'user',
                         content: [
-                            {
-                                type: 'text',
-                                text: `Analyze the object at X:${x}% Y:${y}%. 
-                                Provide the result in two languages:
-                                - "textFrom": Name in ${langFrom}
-                                - "textTo": Name in ${langTo}
-                                - "bbox": [ymin, xmin, ymax, xmax] (0-1000 scaled).
-                                Respond ONLY with the JSON object.`
-                            },
+                            { type: 'text', text: promptText },
                             { type: 'image_url', image_url: { url: preview } }
                         ]
                     }],
@@ -131,11 +152,16 @@ function Home() {
             const data = await response.json()
             const parsed = JSON.parse(data.choices[0].message.content)
 
-            const thumbnail = await cropImage(preview, parsed.bbox)
+            const elements = parsed.elements || (parsed.bbox ? [{ textFrom: parsed.textFrom, textTo: parsed.textTo, bbox: parsed.bbox }] : [])
+            const thumbnails = await Promise.all(elements.map(el => cropImage(preview, el.bbox)))
+
+            const elementsWithThumbnails = elements.map((el, i) => ({ ...el, thumbnail: thumbnails[i] }))
 
             setResult({
-                ...parsed,
-                thumbnail
+                textFrom: elementsWithThumbnails.map(e => e.textFrom).join('; '),
+                textTo: elementsWithThumbnails.map(e => e.textTo).join('; '),
+                thumbnail: elementsWithThumbnails[0]?.thumbnail ?? null,
+                elements: elementsWithThumbnails
             })
         } catch (err) {
             alert('Error: ' + err.message)
@@ -147,11 +173,12 @@ function Home() {
 
     const saveToDictionary = () => {
         const saved = JSON.parse(localStorage.getItem('dictionary') || '[]')
+        const firstDot = dots[0] || { x: 0, y: 0 }
         const newItem = {
             id: Date.now(),
             image: result.thumbnail || preview,
-            x,
-            y,
+            x: firstDot.x,
+            y: firstDot.y,
             result: `${result.textFrom} - ${result.textTo}`,
             language: `${langFrom} -> ${langTo}`,
             date: new Date().toLocaleString()
@@ -182,8 +209,8 @@ function Home() {
             )}
 
             <div>
-                <label>X (%): <input type="number" value={x} onChange={e => setX(e.target.value)} /></label>
-                <label>Y (%): <input type="number" value={y} onChange={e => setY(e.target.value)} /></label>
+                <p>Click on the image to place up to {MAX_DOTS} dots ({dots.length}/{MAX_DOTS} placed). Click a dot to remove it.</p>
+                {dots.length > 0 && <button type="button" onClick={clearDots}>Clear all dots</button>}
 
                 <div>
                     <span>З: </span>
@@ -198,7 +225,7 @@ function Home() {
                     </select>
                 </div>
 
-                <button onClick={analyzeImage} disabled={loading}>
+                <button onClick={analyzeImage} disabled={loading || dots.length === 0}>
                     {loading ? '...' : 'Analyze'}
                 </button>
             </div>
@@ -209,43 +236,63 @@ function Home() {
                         src={preview}
                         onClick={handleImageClick}
                         alt="preview"
-                        style={{ maxWidth: '100%', cursor: 'crosshair' }}
+                        style={{ maxWidth: '100%', cursor: dots.length >= MAX_DOTS ? 'default' : 'crosshair' }}
                     />
-                    <div style={{
-                        position: 'absolute',
-                        left: `${x}%`,
-                        top: `${y}%`,
-                        width: '10px',
-                        height: '10px',
-                        background: 'red',
-                        borderRadius: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        pointerEvents: 'none',
-                        zIndex: 2
-                    }}></div>
+                    {dots.map((dot, index) => (
+                        <div
+                            key={index}
+                            onClick={(e) => { e.stopPropagation(); removeDot(index) }}
+                            style={{
+                                position: 'absolute',
+                                left: `${dot.x}%`,
+                                top: `${dot.y}%`,
+                                width: '14px',
+                                height: '14px',
+                                background: 'red',
+                                borderRadius: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                cursor: 'pointer',
+                                zIndex: 2,
+                                border: '2px solid white',
+                                boxSizing: 'border-box'
+                            }}
+                            title={`Point ${index + 1} (click to remove)`}
+                        >
+                            <span style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', fontSize: 9, color: 'white', fontWeight: 'bold' }}>{index + 1}</span>
+                        </div>
+                    ))}
 
                     {result && (
                         <div style={{
                             position: 'absolute',
-                            left: `${x}%`,
-                            top: `${y}%`,
+                            left: dots[0] ? `${dots[0].x}%` : '50%',
+                            top: dots[0] ? `${dots[0].y}%` : '50%',
                             transform: 'translate(10px, 10px)',
                             zIndex: 3,
                             background: 'white',
-                            padding: '5px',
-                            border: '1px solid black'
+                            padding: '8px',
+                            border: '1px solid black',
+                            maxWidth: '280px'
                         }}>
                             <strong>Result:</strong>
-                            {result.thumbnail && (
-                                <div>
-                                    <img src={result.thumbnail} alt="crop" style={{ width: '80px', display: 'block' }} />
-                                </div>
+                            {result.elements?.length > 0 ? (
+                                result.elements.map((el, i) => (
+                                    <div key={i} style={{ marginTop: i ? 8 : 0, paddingTop: i ? 8 : 0, borderTop: i ? '1px solid #eee' : 'none' }}>
+                                        {el.thumbnail && <img src={el.thumbnail} alt={`crop ${i + 1}`} style={{ width: '80px', display: 'block' }} />}
+                                        <div><strong>{el.textFrom}</strong> → {el.textTo}</div>
+                                        {el.bbox && <small style={{ color: '#666' }}>Stroke bbox: [{el.bbox.join(', ')}]</small>}
+                                    </div>
+                                ))
+                            ) : (
+                                <>
+                                    {result.thumbnail && <div><img src={result.thumbnail} alt="crop" style={{ width: '80px', display: 'block' }} /></div>}
+                                    <div>{result.textFrom}</div>
+                                    <div>{result.textTo}</div>
+                                </>
                             )}
-                            <div>{result.textFrom}</div>
-                            <div>{result.textTo}</div>
 
                             {!loading && (
-                                <button onClick={saveToDictionary}>
+                                <button onClick={saveToDictionary} style={{ marginTop: 8 }}>
                                     Зберегти в словник
                                 </button>
                             )}
