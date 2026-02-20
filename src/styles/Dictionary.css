@@ -1,5 +1,5 @@
 .dictionary-container {
-    max-width: 800px;
+    max-width: 1000px;
     margin: 0 auto;
     padding: 20px;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -86,8 +86,8 @@
 }
 
 .item-thumbnail {
-    width: 120px;
-    height: 120px;
+    width: 250px;
+    height: 250px;
     object-fit: cover;
     border-radius: 8px;
     border: 1px solid #ddd;
